@@ -28,7 +28,7 @@ pub fn run() -> Result<()> {
     info!(%machine, "podman start sequence beginning");
 
     wait_for_machine(&bin, &machine)?;
-    start_machine(&bin)?;
+    start_machine(&bin, &machine)?;
     monitor_machine(&bin, &machine)?;
 
     info!(%machine, "podman monitor exiting (launchd will restart)");
@@ -81,25 +81,24 @@ fn wait_for_machine(bin: &str, machine: &str) -> Result<()> {
 ///
 /// Podman exits 0 even if the machine is already running, so we treat any
 /// non-zero exit as a real error.
-fn start_machine(bin: &str) -> Result<()> {
-    info!("starting podman machine");
+fn start_machine(bin: &str, machine: &str) -> Result<()> {
+    info!(%machine, "starting podman machine");
 
     match run_output(bin, &["machine", "start"]) {
         Ok(stdout) => {
             if !stdout.is_empty() {
                 info!(%stdout, "podman machine start output");
             }
-            info!("podman machine started");
+            info!(%machine, "podman machine started");
             Ok(())
         }
         Err(e) => {
             // `podman machine start` may fail if the machine is already
             // running.  Check state before bailing.
-            warn!("podman machine start returned error: {e:#}");
-            let state = get_machine_state(bin, "podman-machine-default")
-                .unwrap_or_default();
+            warn!(%machine, "podman machine start returned error: {e:#}");
+            let state = get_machine_state(bin, machine).unwrap_or_default();
             if state == "running" {
-                info!("machine is already running, continuing");
+                info!(%machine, "machine is already running, continuing");
                 Ok(())
             } else {
                 Err(e).context("podman machine start failed")

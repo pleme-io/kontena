@@ -7,6 +7,8 @@ use std::time::Duration;
 /// `multiplier` and capping at `max`.  Returns `None` once `max_attempts` have
 /// been exhausted.
 pub struct ExponentialBackoff {
+    /// Kept for [`reset`](Self::reset).
+    #[allow(dead_code)]
     initial: Duration,
     current: Duration,
     multiplier: f64,
@@ -49,6 +51,7 @@ impl ExponentialBackoff {
     }
 
     /// Reset the backoff to its initial state.
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.current = self.initial;
         self.attempts = 0;
