@@ -3,16 +3,15 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
-use crate::util::backoff::ExponentialBackoff;
 use crate::util::process::{run_check, run_output};
-use crate::util::env_or;
+use crate::util::{env_or, env_parse};
 
 /// Start the podman machine and monitor it until it stops.
 ///
-/// **Phase 1 -- wait:** The activation script that initialises the machine may
-/// still be running when launchd starts this agent.  We use exponential backoff
-/// (100 ms initial, x1.5, 5 s cap, 30 attempts) to discover the machine
-/// quickly once it appears.
+/// **Phase 1 -- init:** If the machine doesn't exist, create it with the
+/// configured CPU/memory/disk parameters.  This replaces the old activation
+/// script approach (which ran as root and failed because `podman machine init`
+/// refuses to run as root).
 ///
 /// **Phase 2 -- start:** Issue `podman machine start`.  If the machine is
 /// already running this is a harmless no-op (podman exits 0 in that case).
@@ -27,7 +26,7 @@ pub fn run() -> Result<()> {
 
     info!(%machine, "podman start sequence beginning");
 
-    wait_for_machine(&bin, &machine)?;
+    ensure_machine_exists(&bin, &machine)?;
     start_machine(&bin, &machine)?;
     monitor_machine(&bin, &machine)?;
 
@@ -35,44 +34,44 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Block until the named machine exists, using exponential backoff.
-fn wait_for_machine(bin: &str, machine: &str) -> Result<()> {
-    // Fast path: machine already exists.
+/// Ensure the named machine exists, creating it if necessary.
+fn ensure_machine_exists(bin: &str, machine: &str) -> Result<()> {
     if machine_exists(bin, machine)? {
         info!(%machine, "machine already exists");
         return Ok(());
     }
 
-    info!(%machine, "waiting for machine to appear");
+    let cpus: u32 = env_parse("KONTENA_PODMAN_CPUS", 4)?;
+    let memory: u32 = env_parse("KONTENA_PODMAN_MEMORY", 4096)?;
+    let disk: u32 = env_parse("KONTENA_PODMAN_DISK", 60)?;
 
-    let mut backoff = ExponentialBackoff::new(
-        Duration::from_millis(100),
-        1.5,
-        Duration::from_secs(5),
-        30,
-    );
+    let cpus_s = cpus.to_string();
+    let memory_s = memory.to_string();
+    let disk_s = disk.to_string();
 
-    loop {
-        match backoff.next_delay() {
-            Some(delay) => {
-                debug!(?delay, attempt = backoff.attempts(), "sleeping before next check");
-                std::thread::sleep(delay);
-            }
-            None => {
-                anyhow::bail!(
-                    "machine {machine} did not appear after {} attempts",
-                    backoff.attempts()
-                );
-            }
+    info!(%machine, cpus, memory, disk, "initializing podman machine");
+
+    match run_output(
+        bin,
+        &[
+            "machine", "init",
+            "--cpus", &cpus_s,
+            "--memory", &memory_s,
+            "--disk-size", &disk_s,
+        ],
+    ) {
+        Ok(stdout) => {
+            info!(%machine, %stdout, "podman machine initialized");
+            Ok(())
         }
-
-        if machine_exists(bin, machine)? {
-            info!(
-                %machine,
-                attempts = backoff.attempts(),
-                "machine appeared"
-            );
-            return Ok(());
+        Err(e) => {
+            // Race: machine may have appeared between check and init.
+            if machine_exists(bin, machine)? {
+                warn!(%machine, "init error but machine exists (race): {e:#}");
+                Ok(())
+            } else {
+                Err(e).context("podman machine init failed")
+            }
         }
     }
 }
