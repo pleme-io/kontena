@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 use crate::util::process::{run_check, run_output};
-use crate::util::{env_or, env_parse};
+use crate::util::{env_bool, env_or, env_parse};
 
 /// Idempotent podman machine initialisation.
 ///
@@ -15,6 +15,7 @@ pub fn run() -> Result<()> {
     let memory: u32 = env_parse("KONTENA_PODMAN_MEMORY", 4096)?;
     let disk: u32 = env_parse("KONTENA_PODMAN_DISK", 60)?;
     let machine = env_or("KONTENA_MACHINE_NAME", "podman-machine-default");
+    let rootful = env_bool("KONTENA_PODMAN_ROOTFUL", false);
 
     validate_range("cpus", cpus, 1, 256)?;
     validate_range("memory", memory, 512, 131_072)?;
@@ -30,23 +31,21 @@ pub fn run() -> Result<()> {
     let disk_s = disk.to_string();
 
     info!(
-        %machine, cpus, memory, disk,
+        %machine, cpus, memory, disk, rootful,
         "initializing podman machine"
     );
 
-    let output = run_output(
-        &bin,
-        &[
-            "machine",
-            "init",
-            "--cpus",
-            &cpus_s,
-            "--memory",
-            &memory_s,
-            "--disk-size",
-            &disk_s,
-        ],
-    );
+    let mut args = vec![
+        "machine", "init",
+        "--cpus", &cpus_s,
+        "--memory", &memory_s,
+        "--disk-size", &disk_s,
+    ];
+    if rootful {
+        args.push("--rootful");
+    }
+
+    let output = run_output(&bin, &args);
 
     match output {
         Ok(stdout) => {

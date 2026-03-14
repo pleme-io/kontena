@@ -8,6 +8,14 @@ pub fn env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_owned())
 }
 
+/// Read a boolean environment variable (true/false/1/0), or return a default.
+pub fn env_bool(key: &str, default: bool) -> bool {
+    match env::var(key) {
+        Ok(val) => matches!(val.as_str(), "true" | "1" | "yes"),
+        Err(_) => default,
+    }
+}
+
 /// Read an environment variable and parse it, or return a default value.
 ///
 /// # Errors

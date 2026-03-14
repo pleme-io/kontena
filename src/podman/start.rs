@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
 use crate::util::process::{run_check, run_output};
-use crate::util::{env_or, env_parse};
+use crate::util::{env_bool, env_or, env_parse};
 
 /// Start the podman machine and monitor it until it stops.
 ///
@@ -44,22 +44,25 @@ fn ensure_machine_exists(bin: &str, machine: &str) -> Result<()> {
     let cpus: u32 = env_parse("KONTENA_PODMAN_CPUS", 4)?;
     let memory: u32 = env_parse("KONTENA_PODMAN_MEMORY", 4096)?;
     let disk: u32 = env_parse("KONTENA_PODMAN_DISK", 60)?;
+    let rootful = env_bool("KONTENA_PODMAN_ROOTFUL", false);
 
     let cpus_s = cpus.to_string();
     let memory_s = memory.to_string();
     let disk_s = disk.to_string();
 
-    info!(%machine, cpus, memory, disk, "initializing podman machine");
+    info!(%machine, cpus, memory, disk, rootful, "initializing podman machine");
 
-    match run_output(
-        bin,
-        &[
-            "machine", "init",
-            "--cpus", &cpus_s,
-            "--memory", &memory_s,
-            "--disk-size", &disk_s,
-        ],
-    ) {
+    let mut args = vec![
+        "machine", "init",
+        "--cpus", &cpus_s,
+        "--memory", &memory_s,
+        "--disk-size", &disk_s,
+    ];
+    if rootful {
+        args.push("--rootful");
+    }
+
+    match run_output(bin, &args) {
         Ok(stdout) => {
             info!(%machine, %stdout, "podman machine initialized");
             Ok(())
