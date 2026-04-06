@@ -76,3 +76,43 @@ fn validate_range(name: &str, value: u32, min: u32, max: u32) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_range_accepts_boundaries() {
+        assert!(validate_range("cpus", 1, 1, 256).is_ok());
+        assert!(validate_range("cpus", 256, 1, 256).is_ok());
+    }
+
+    #[test]
+    fn validate_range_accepts_podman_defaults() {
+        assert!(validate_range("cpus", 4, 1, 256).is_ok());
+        assert!(validate_range("memory", 4096, 512, 131_072).is_ok());
+        assert!(validate_range("disk", 60, 10, 2048).is_ok());
+    }
+
+    #[test]
+    fn validate_range_rejects_memory_below_minimum() {
+        let err = validate_range("memory", 256, 512, 131_072).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("memory=256"), "{msg}");
+        assert!(msg.contains("[512, 131072]"), "{msg}");
+    }
+
+    #[test]
+    fn validate_range_rejects_disk_above_maximum() {
+        let err = validate_range("disk", 3000, 10, 2048).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("disk=3000"), "{msg}");
+    }
+
+    #[test]
+    fn validate_range_min_equals_max() {
+        assert!(validate_range("x", 5, 5, 5).is_ok());
+        assert!(validate_range("x", 4, 5, 5).is_err());
+        assert!(validate_range("x", 6, 5, 5).is_err());
+    }
+}
