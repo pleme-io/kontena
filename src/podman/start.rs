@@ -114,14 +114,14 @@ pub(crate) fn start_machine(runner: &dyn CommandRunner, bin: &str, machine: &str
         }
         Err(e) => {
             warn!(%machine, "podman machine start returned error: {e}");
-            let state = get_machine_state(runner, bin, machine).unwrap_or_default();
-            if state == "running" {
-                info!(%machine, "machine is already running, continuing");
-                Ok(())
-            } else {
-                Err(Error::MachineStart {
+            match get_machine_state(runner, bin, machine) {
+                Ok(state) if state == "running" => {
+                    info!(%machine, "machine is already running, continuing");
+                    Ok(())
+                }
+                Ok(_) | Err(_) => Err(Error::MachineStart {
                     reason: e.to_string(),
-                })
+                }),
             }
         }
     }
