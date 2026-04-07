@@ -113,9 +113,23 @@ fn machine_exists(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use crate::util::mock::testing::{Call, MockCommandRunner, MockResponse};
     use crate::util::validate;
 
     use super::*;
+
+    fn default_config() -> InitConfig {
+        InitConfig {
+            bin: "podman".into(),
+            cpus: 4,
+            memory: 4096,
+            disk: 60,
+            machine: "test-machine".into(),
+            rootful: false,
+        }
+    }
+
+    // --- validation tests ---
 
     #[test]
     fn podman_default_cpus_within_range() {
@@ -150,27 +164,128 @@ mod tests {
 
     #[test]
     fn config_validate_accepts_defaults() {
-        let config = InitConfig {
-            bin: "podman".into(),
-            cpus: 4,
-            memory: 4096,
-            disk: 60,
-            machine: "default".into(),
-            rootful: false,
-        };
-        assert!(config.validate().is_ok());
+        assert!(default_config().validate().is_ok());
     }
 
     #[test]
     fn config_validate_rejects_zero_cpus() {
-        let config = InitConfig {
-            bin: "podman".into(),
-            cpus: 0,
-            memory: 4096,
-            disk: 60,
-            machine: "default".into(),
-            rootful: false,
-        };
+        let mut config = default_config();
+        config.cpus = 0;
         assert!(config.validate().is_err());
+    }
+
+    // --- mock-based lifecycle tests ---
+
+    #[test]
+    fn init_skips_when_machine_already_exists() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(true), // machine_exists -> true
+        ]);
+
+        let result = run_with(&mock, &default_config());
+        assert!(result.is_ok());
+
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0],
+            Call {
+                bin: "podman".into(),
+                args: vec!["machine".into(), "inspect".into(), "test-machine".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn init_creates_machine_when_not_exists() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),                     // machine_exists -> false
+            MockResponse::Output("Machine init".into()),    // run_output (init) -> ok
+        ]);
+
+        let result = run_with(&mock, &default_config());
+        assert!(result.is_ok());
+
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].args[0], "machine");
+        assert_eq!(calls[1].args[1], "init");
+        assert!(calls[1].args.contains(&"--cpus".to_owned()));
+        assert!(calls[1].args.contains(&"4".to_owned()));
+    }
+
+    #[test]
+    fn init_includes_rootful_flag() {
+        let mut config = default_config();
+        config.rootful = true;
+
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),
+            MockResponse::Output("ok".into()),
+        ]);
+
+        run_with(&mock, &config).unwrap();
+
+        let calls = mock.calls();
+        assert!(calls[1].args.contains(&"--rootful".to_owned()));
+    }
+
+    #[test]
+    fn init_omits_rootful_when_false() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),
+            MockResponse::Output("ok".into()),
+        ]);
+
+        run_with(&mock, &default_config()).unwrap();
+
+        let calls = mock.calls();
+        assert!(!calls[1].args.contains(&"--rootful".to_owned()));
+    }
+
+    #[test]
+    fn init_handles_race_condition_gracefully() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),     // machine_exists -> false
+            MockResponse::Err(Error::NonZeroExit {  // init fails
+                bin: "podman".into(),
+                status: "exit status: 125".into(),
+                stderr: "already exists".into(),
+            }),
+            MockResponse::Check(true),      // re-check -> machine now exists
+        ]);
+
+        let result = run_with(&mock, &default_config());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn init_fails_when_init_errors_and_machine_still_missing() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),     // machine_exists -> false
+            MockResponse::Err(Error::NonZeroExit {
+                bin: "podman".into(),
+                status: "exit status: 1".into(),
+                stderr: "fatal error".into(),
+            }),
+            MockResponse::Check(false),     // re-check -> still missing
+        ]);
+
+        let result = run_with(&mock, &default_config());
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("machine init failed"), "{msg}");
+    }
+
+    #[test]
+    fn init_rejects_invalid_config_before_subprocess_calls() {
+        let mut config = default_config();
+        config.memory = 100; // below 512 minimum
+
+        let mock = MockCommandRunner::new(vec![]);
+
+        let result = run_with(&mock, &config);
+        assert!(result.is_err());
+        assert!(mock.calls().is_empty(), "no subprocess calls should be made");
     }
 }

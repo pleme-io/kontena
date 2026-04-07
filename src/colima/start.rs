@@ -98,9 +98,24 @@ pub(crate) fn run_with(runner: &dyn CommandRunner, config: &ColimaConfig) -> Res
 
 #[cfg(test)]
 mod tests {
+    use crate::util::mock::testing::{MockCommandRunner, MockResponse};
     use crate::util::validate;
 
     use super::*;
+
+    fn default_config() -> ColimaConfig {
+        ColimaConfig {
+            bin: "colima".into(),
+            cpus: 4,
+            memory: 8,
+            disk: 60,
+            vm_type: "vz".into(),
+            runtime: "docker".into(),
+            rosetta: true,
+        }
+    }
+
+    // --- validation tests ---
 
     #[test]
     fn colima_default_cpus_within_range() {
@@ -153,92 +168,138 @@ mod tests {
         assert!(msg.contains("VZ"), "{msg}");
     }
 
+    // --- config tests ---
+
     #[test]
     fn config_validate_accepts_defaults() {
-        let config = ColimaConfig {
-            bin: "colima".into(),
-            cpus: 4,
-            memory: 8,
-            disk: 60,
-            vm_type: "vz".into(),
-            runtime: "docker".into(),
-            rosetta: true,
-        };
-        assert!(config.validate().is_ok());
+        assert!(default_config().validate().is_ok());
     }
 
     #[test]
     fn config_validate_rejects_bad_vm_type() {
-        let config = ColimaConfig {
-            bin: "colima".into(),
-            cpus: 4,
-            memory: 8,
-            disk: 60,
-            vm_type: "hyperv".into(),
-            runtime: "docker".into(),
-            rosetta: true,
-        };
+        let mut config = default_config();
+        config.vm_type = "hyperv".into();
         assert!(config.validate().is_err());
     }
 
     #[test]
+    fn config_validate_rejects_bad_runtime() {
+        let mut config = default_config();
+        config.runtime = "podman".into();
+        assert!(config.validate().is_err());
+    }
+
+    // --- build_args tests ---
+
+    #[test]
     fn build_args_includes_rosetta_for_vz() {
-        let config = ColimaConfig {
-            bin: "colima".into(),
-            cpus: 4,
-            memory: 8,
-            disk: 60,
-            vm_type: "vz".into(),
-            runtime: "docker".into(),
-            rosetta: true,
-        };
-        let args = config.build_args();
+        let args = default_config().build_args();
         assert!(args.contains(&"--vz-rosetta".to_owned()));
     }
 
     #[test]
     fn build_args_excludes_rosetta_for_qemu() {
-        let config = ColimaConfig {
-            bin: "colima".into(),
-            cpus: 4,
-            memory: 8,
-            disk: 60,
-            vm_type: "qemu".into(),
-            runtime: "docker".into(),
-            rosetta: true,
-        };
+        let mut config = default_config();
+        config.vm_type = "qemu".into();
         let args = config.build_args();
         assert!(!args.contains(&"--vz-rosetta".to_owned()));
     }
 
     #[test]
     fn build_args_excludes_rosetta_when_disabled() {
-        let config = ColimaConfig {
-            bin: "colima".into(),
-            cpus: 4,
-            memory: 8,
-            disk: 60,
-            vm_type: "vz".into(),
-            runtime: "docker".into(),
-            rosetta: false,
-        };
+        let mut config = default_config();
+        config.rosetta = false;
         let args = config.build_args();
         assert!(!args.contains(&"--vz-rosetta".to_owned()));
     }
 
     #[test]
     fn build_args_contains_foreground() {
-        let config = ColimaConfig {
-            bin: "colima".into(),
-            cpus: 2,
-            memory: 4,
-            disk: 20,
-            vm_type: "vz".into(),
-            runtime: "containerd".into(),
-            rosetta: false,
-        };
+        let mut config = default_config();
+        config.rosetta = false;
+        config.runtime = "containerd".into();
         let args = config.build_args();
         assert!(args.contains(&"--foreground".to_owned()));
         assert!(args.contains(&"--runtime".to_owned()));
+    }
+
+    #[test]
+    fn build_args_contains_correct_values() {
+        let mut config = default_config();
+        config.cpus = 2;
+        config.memory = 16;
+        config.disk = 100;
+        let args = config.build_args();
+        assert!(args.contains(&"2".to_owned()));
+        assert!(args.contains(&"16".to_owned()));
+        assert!(args.contains(&"100".to_owned()));
+    }
+
+    // --- mock-based lifecycle tests ---
+
+    #[test]
+    fn run_with_execs_colima() {
+        let config = default_config();
+        let mock = MockCommandRunner::new(vec![MockResponse::ExecOk]);
+
+        let result = run_with(&mock, &config);
+        assert!(result.is_ok());
+
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].bin, "colima");
+        assert!(calls[0].args.contains(&"start".to_owned()));
+        assert!(calls[0].args.contains(&"--foreground".to_owned()));
+    }
+
+    #[test]
+    fn run_with_rejects_invalid_config() {
+        let mut config = default_config();
+        config.cpus = 0;
+
+        let mock = MockCommandRunner::new(vec![]);
+
+        let result = run_with(&mock, &config);
+        assert!(result.is_err());
+        assert!(mock.calls().is_empty());
+    }
+
+    #[test]
+    fn run_with_propagates_exec_error() {
+        let config = default_config();
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Err(Error::Exec {
+                bin: "colima".into(),
+                reason: "not found".into(),
+            }),
+        ]);
+
+        let err = run_with(&mock, &config).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("colima"), "{msg}");
+    }
+
+    #[test]
+    fn run_with_passes_rosetta_flag() {
+        let config = default_config();
+        let mock = MockCommandRunner::new(vec![MockResponse::ExecOk]);
+
+        run_with(&mock, &config).unwrap();
+
+        let calls = mock.calls();
+        assert!(calls[0].args.contains(&"--vz-rosetta".to_owned()));
+    }
+
+    #[test]
+    fn run_with_omits_rosetta_for_qemu() {
+        let mut config = default_config();
+        config.vm_type = "qemu".into();
+
+        let mock = MockCommandRunner::new(vec![MockResponse::ExecOk]);
+
+        run_with(&mock, &config).unwrap();
+
+        let calls = mock.calls();
+        assert!(!calls[0].args.contains(&"--vz-rosetta".to_owned()));
     }
 }

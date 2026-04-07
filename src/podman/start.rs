@@ -54,7 +54,7 @@ pub(crate) fn run_with(runner: &dyn CommandRunner, config: &StartConfig) -> Resu
 }
 
 /// Ensure the named machine exists, creating it if necessary.
-fn ensure_machine_exists(runner: &dyn CommandRunner, config: &StartConfig) -> Result<(), Error> {
+pub(crate) fn ensure_machine_exists(runner: &dyn CommandRunner, config: &StartConfig) -> Result<(), Error> {
     if machine_exists(runner, &config.bin, &config.machine)? {
         info!(machine = %config.machine, "machine already exists");
         return Ok(());
@@ -102,7 +102,7 @@ fn ensure_machine_exists(runner: &dyn CommandRunner, config: &StartConfig) -> Re
 }
 
 /// Issue `podman machine start`.
-fn start_machine(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<(), Error> {
+pub(crate) fn start_machine(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<(), Error> {
     info!(%machine, "starting podman machine");
 
     match runner.run_output(bin, &["machine", "start"]) {
@@ -157,12 +157,12 @@ fn monitor_machine(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Resu
 }
 
 /// Check whether a named podman machine exists.
-fn machine_exists(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<bool, Error> {
+pub(crate) fn machine_exists(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<bool, Error> {
     runner.run_check(bin, &["machine", "inspect", machine])
 }
 
 /// Query the state of a machine via `podman machine inspect --format`.
-fn get_machine_state(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<String, Error> {
+pub(crate) fn get_machine_state(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<String, Error> {
     runner.run_output(
         bin,
         &["machine", "inspect", machine, "--format", "{{.State}}"],
@@ -171,4 +171,189 @@ fn get_machine_state(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Re
         machine: machine.to_owned(),
         reason: e.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::util::mock::testing::{Call, MockCommandRunner, MockResponse};
+
+    use super::*;
+
+    fn default_config() -> StartConfig {
+        StartConfig {
+            bin: "podman".into(),
+            machine: "test-machine".into(),
+            cpus: 4,
+            memory: 4096,
+            disk: 60,
+            rootful: false,
+        }
+    }
+
+    // --- ensure_machine_exists tests ---
+
+    #[test]
+    fn ensure_machine_exists_skips_init_when_present() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(true), // machine exists
+        ]);
+
+        let result = ensure_machine_exists(&mock, &default_config());
+        assert!(result.is_ok());
+        assert_eq!(mock.calls().len(), 1);
+    }
+
+    #[test]
+    fn ensure_machine_exists_creates_when_absent() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),                  // machine doesn't exist
+            MockResponse::Output("initialized".into()), // init succeeds
+        ]);
+
+        let result = ensure_machine_exists(&mock, &default_config());
+        assert!(result.is_ok());
+        assert_eq!(mock.calls().len(), 2);
+        assert_eq!(mock.calls()[1].args[1], "init");
+    }
+
+    #[test]
+    fn ensure_machine_exists_includes_rootful() {
+        let mut config = default_config();
+        config.rootful = true;
+
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),
+            MockResponse::Output("ok".into()),
+        ]);
+
+        ensure_machine_exists(&mock, &config).unwrap();
+        assert!(mock.calls()[1].args.contains(&"--rootful".to_owned()));
+    }
+
+    #[test]
+    fn ensure_machine_exists_handles_race() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),
+            MockResponse::Err(Error::NonZeroExit {
+                bin: "podman".into(),
+                status: "exit status: 125".into(),
+                stderr: "already exists".into(),
+            }),
+            MockResponse::Check(true), // now exists
+        ]);
+
+        assert!(ensure_machine_exists(&mock, &default_config()).is_ok());
+    }
+
+    #[test]
+    fn ensure_machine_exists_fails_on_init_error() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Check(false),
+            MockResponse::Err(Error::Spawn {
+                bin: "podman".into(),
+                reason: "not found".into(),
+            }),
+            MockResponse::Check(false), // still missing
+        ]);
+
+        let err = ensure_machine_exists(&mock, &default_config()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("machine init failed"), "{msg}");
+    }
+
+    // --- start_machine tests ---
+
+    #[test]
+    fn start_machine_succeeds() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Output("Machine started".into()),
+        ]);
+
+        assert!(start_machine(&mock, "podman", "test-machine").is_ok());
+
+        let calls = mock.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0],
+            Call {
+                bin: "podman".into(),
+                args: vec!["machine".into(), "start".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn start_machine_tolerates_already_running() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Err(Error::NonZeroExit {
+                bin: "podman".into(),
+                status: "exit status: 125".into(),
+                stderr: "already running".into(),
+            }),
+            MockResponse::Output("running".into()), // get_machine_state
+        ]);
+
+        assert!(start_machine(&mock, "podman", "test-machine").is_ok());
+    }
+
+    #[test]
+    fn start_machine_fails_when_not_running() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Err(Error::NonZeroExit {
+                bin: "podman".into(),
+                status: "exit status: 1".into(),
+                stderr: "fatal".into(),
+            }),
+            MockResponse::Output("stopped".into()), // state != running
+        ]);
+
+        let err = start_machine(&mock, "podman", "test-machine").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("machine start failed"), "{msg}");
+    }
+
+    // --- get_machine_state tests ---
+
+    #[test]
+    fn get_machine_state_returns_state() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Output("running".into()),
+        ]);
+
+        let state = get_machine_state(&mock, "podman", "test-machine").unwrap();
+        assert_eq!(state, "running");
+
+        let calls = mock.calls();
+        assert_eq!(calls[0].args, vec![
+            "machine", "inspect", "test-machine", "--format", "{{.State}}"
+        ]);
+    }
+
+    #[test]
+    fn get_machine_state_wraps_error() {
+        let mock = MockCommandRunner::new(vec![
+            MockResponse::Err(Error::Spawn {
+                bin: "podman".into(),
+                reason: "not found".into(),
+            }),
+        ]);
+
+        let err = get_machine_state(&mock, "podman", "my-machine").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("my-machine"), "{msg}");
+    }
+
+    // --- machine_exists tests ---
+
+    #[test]
+    fn machine_exists_returns_true_on_success() {
+        let mock = MockCommandRunner::new(vec![MockResponse::Check(true)]);
+        assert!(machine_exists(&mock, "podman", "m").unwrap());
+    }
+
+    #[test]
+    fn machine_exists_returns_false_on_failure() {
+        let mock = MockCommandRunner::new(vec![MockResponse::Check(false)]);
+        assert!(!machine_exists(&mock, "podman", "m").unwrap());
+    }
 }

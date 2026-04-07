@@ -1,5 +1,5 @@
 /// Errors produced by the kontena daemon.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     /// A numeric configuration value is outside the acceptable range.
     #[error("{name}={value} is out of range [{min}, {max}]")]
