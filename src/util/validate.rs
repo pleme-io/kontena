@@ -28,18 +28,23 @@ pub fn range<T: PartialOrd + fmt::Display>(name: &str, value: &T, min: &T, max: 
 #[must_use = "validation result must be checked"]
 pub fn one_of(name: &str, value: &str, allowed: &[&str]) -> Result<(), Error> {
     if !allowed.contains(&value) {
-        let allowed_display = allowed
-            .iter()
-            .map(|s| format!("{s:?}"))
-            .collect::<Vec<_>>()
-            .join(", ");
         return Err(Error::InvalidEnum {
             name: name.to_owned(),
             value: value.to_owned(),
-            allowed: allowed_display,
+            allowed: format_quoted_list(allowed),
         });
     }
     Ok(())
+}
+
+/// Format a slice of strings as a quoted, comma-separated list.
+#[must_use]
+fn format_quoted_list(items: &[&str]) -> String {
+    items
+        .iter()
+        .map(|s| format!("{s:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -118,5 +123,12 @@ mod tests {
     fn one_of_single_allowed_value() {
         assert!(one_of("x", "only", &["only"]).is_ok());
         assert!(one_of("x", "other", &["only"]).is_err());
+    }
+
+    #[test]
+    fn format_quoted_list_formats_correctly() {
+        assert_eq!(format_quoted_list(&["a", "b"]), r#""a", "b""#);
+        assert_eq!(format_quoted_list(&["x"]), r#""x""#);
+        assert_eq!(format_quoted_list(&[]), "");
     }
 }

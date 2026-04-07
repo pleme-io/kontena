@@ -7,6 +7,7 @@ use crate::util::{env_bool, env_or, env_parse};
 
 /// Configuration for podman machine initialisation.
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct InitConfig {
     pub bin: String,
     pub cpus: u32,
@@ -14,6 +15,19 @@ pub(crate) struct InitConfig {
     pub disk: u32,
     pub machine: String,
     pub rootful: bool,
+}
+
+impl Default for InitConfig {
+    fn default() -> Self {
+        Self {
+            bin: "podman".into(),
+            cpus: 4,
+            memory: 4096,
+            disk: 60,
+            machine: "podman-machine-default".into(),
+            rootful: false,
+        }
+    }
 }
 
 impl InitConfig {
@@ -120,12 +134,8 @@ mod tests {
 
     fn default_config() -> InitConfig {
         InitConfig {
-            bin: "podman".into(),
-            cpus: 4,
-            memory: 4096,
-            disk: 60,
             machine: "test-machine".into(),
-            rootful: false,
+            ..InitConfig::default()
         }
     }
 

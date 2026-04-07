@@ -7,6 +7,7 @@ use crate::util::{env_or, env_parse};
 
 /// Configuration for colima start.
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct ColimaConfig {
     pub bin: String,
     pub cpus: u32,
@@ -15,6 +16,20 @@ pub(crate) struct ColimaConfig {
     pub vm_type: String,
     pub runtime: String,
     pub rosetta: bool,
+}
+
+impl Default for ColimaConfig {
+    fn default() -> Self {
+        Self {
+            bin: "colima".into(),
+            cpus: 4,
+            memory: 8,
+            disk: 60,
+            vm_type: "vz".into(),
+            runtime: "docker".into(),
+            rosetta: true,
+        }
+    }
 }
 
 impl ColimaConfig {
@@ -105,15 +120,7 @@ mod tests {
     use super::*;
 
     fn default_config() -> ColimaConfig {
-        ColimaConfig {
-            bin: "colima".into(),
-            cpus: 4,
-            memory: 8,
-            disk: 60,
-            vm_type: "vz".into(),
-            runtime: "docker".into(),
-            rosetta: true,
-        }
+        ColimaConfig::default()
     }
 
     // --- validation tests ---
