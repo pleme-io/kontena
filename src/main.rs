@@ -1,4 +1,5 @@
 mod colima;
+mod error;
 mod podman;
 mod util;
 
@@ -62,7 +63,7 @@ fn main() {
     };
 
     if let Err(err) = result {
-        error!("{err:#}");
+        error!("{err}");
         std::process::exit(1);
     }
 }

@@ -1,26 +1,27 @@
 use std::time::Duration;
 
-use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
+use crate::error::Error;
 use crate::util::process::{run_check, run_output};
 use crate::util::{env_bool, env_or, env_parse};
 
 /// Start the podman machine and monitor it until it stops.
 ///
 /// **Phase 1 -- init:** If the machine doesn't exist, create it with the
-/// configured CPU/memory/disk parameters.  This replaces the old activation
-/// script approach (which ran as root and failed because `podman machine init`
-/// refuses to run as root).
+/// configured CPU/memory/disk parameters.
 ///
 /// **Phase 2 -- start:** Issue `podman machine start`.  If the machine is
-/// already running this is a harmless no-op (podman exits 0 in that case).
+/// already running this is a harmless no-op.
 ///
 /// **Phase 3 -- monitor:** Poll machine state with adaptive intervals (1 s
-/// initial, +10 % per check, 30 s cap).  When the machine is stable, checks
-/// are infrequent (low CPU).  On state change the function returns and launchd
-/// restarts the agent.
-pub fn run() -> Result<()> {
+/// initial, +10 % per check, 30 s cap).  On state change the function returns
+/// and launchd restarts the agent.
+///
+/// # Errors
+///
+/// Returns an error if machine initialisation, start, or state inspection fails.
+pub fn run() -> Result<(), Error> {
     let bin = env_or("KONTENA_PODMAN_BIN", "podman");
     let machine = env_or("KONTENA_MACHINE_NAME", "podman-machine-default");
 
@@ -35,7 +36,7 @@ pub fn run() -> Result<()> {
 }
 
 /// Ensure the named machine exists, creating it if necessary.
-fn ensure_machine_exists(bin: &str, machine: &str) -> Result<()> {
+fn ensure_machine_exists(bin: &str, machine: &str) -> Result<(), Error> {
     if machine_exists(bin, machine)? {
         info!(%machine, "machine already exists");
         return Ok(());
@@ -68,12 +69,13 @@ fn ensure_machine_exists(bin: &str, machine: &str) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            // Race: machine may have appeared between check and init.
             if machine_exists(bin, machine)? {
-                warn!(%machine, "init error but machine exists (race): {e:#}");
+                warn!(%machine, "init error but machine exists (race): {e}");
                 Ok(())
             } else {
-                Err(e).context("podman machine init failed")
+                Err(Error::MachineInit {
+                    reason: e.to_string(),
+                })
             }
         }
     }
@@ -82,8 +84,8 @@ fn ensure_machine_exists(bin: &str, machine: &str) -> Result<()> {
 /// Issue `podman machine start`.
 ///
 /// Podman exits 0 even if the machine is already running, so we treat any
-/// non-zero exit as a real error.
-fn start_machine(bin: &str, machine: &str) -> Result<()> {
+/// non-zero exit as a real error — unless the machine state is "running".
+fn start_machine(bin: &str, machine: &str) -> Result<(), Error> {
     info!(%machine, "starting podman machine");
 
     match run_output(bin, &["machine", "start"]) {
@@ -95,15 +97,15 @@ fn start_machine(bin: &str, machine: &str) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            // `podman machine start` may fail if the machine is already
-            // running.  Check state before bailing.
-            warn!(%machine, "podman machine start returned error: {e:#}");
+            warn!(%machine, "podman machine start returned error: {e}");
             let state = get_machine_state(bin, machine).unwrap_or_default();
             if state == "running" {
                 info!(%machine, "machine is already running, continuing");
                 Ok(())
             } else {
-                Err(e).context("podman machine start failed")
+                Err(Error::MachineStart {
+                    reason: e.to_string(),
+                })
             }
         }
     }
@@ -114,7 +116,7 @@ fn start_machine(bin: &str, machine: &str) -> Result<()> {
 /// Starts at 1 s and increases by 10 % each check up to 30 s.  Returns when
 /// the machine is no longer in the "running" state so that launchd can restart
 /// the agent.
-fn monitor_machine(bin: &str, machine: &str) -> Result<()> {
+fn monitor_machine(bin: &str, machine: &str) -> Result<(), Error> {
     let mut interval = Duration::from_secs(1);
     let max_interval = Duration::from_secs(30);
 
@@ -132,22 +134,24 @@ fn monitor_machine(bin: &str, machine: &str) -> Result<()> {
 
         debug!(%machine, ?interval, "machine is running");
 
-        // Adaptive: increase interval by 10 % each tick, cap at max.
         let next_secs = (interval.as_secs_f64() * 1.1).min(max_interval.as_secs_f64());
         interval = Duration::from_secs_f64(next_secs);
     }
 }
 
 /// Check whether a named podman machine exists.
-fn machine_exists(bin: &str, machine: &str) -> Result<bool> {
+fn machine_exists(bin: &str, machine: &str) -> Result<bool, Error> {
     run_check(bin, &["machine", "inspect", machine])
 }
 
 /// Query the state of a machine via `podman machine inspect --format`.
-fn get_machine_state(bin: &str, machine: &str) -> Result<String> {
+fn get_machine_state(bin: &str, machine: &str) -> Result<String, Error> {
     run_output(
         bin,
         &["machine", "inspect", machine, "--format", "{{.State}}"],
     )
-    .with_context(|| format!("failed to inspect machine {machine}"))
+    .map_err(|e| Error::MachineInspect {
+        machine: machine.to_owned(),
+        reason: e.to_string(),
+    })
 }

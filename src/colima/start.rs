@@ -1,16 +1,21 @@
-use anyhow::Result;
 use tracing::info;
 
+use crate::error::Error;
 use crate::util::process::run_exec;
+use crate::util::validate;
 use crate::util::{env_or, env_parse};
 
 /// Start colima in foreground mode.
 ///
 /// Validates all configuration from environment variables, builds the argument
 /// list, and then `exec`s into colima so that it replaces the current process.
-/// Colima runs in `--foreground` mode -- it blocks until stopped and launchd
+/// Colima runs in `--foreground` mode — it blocks until stopped and launchd
 /// restarts the agent when it exits.
-pub fn run() -> Result<()> {
+///
+/// # Errors
+///
+/// Returns an error if configuration is invalid or `exec` fails.
+pub fn run() -> Result<(), Error> {
     let bin = env_or("KONTENA_COLIMA_BIN", "colima");
     let cpus: u32 = env_parse("KONTENA_COLIMA_CPUS", 4)?;
     let memory: u32 = env_parse("KONTENA_COLIMA_MEMORY", 8)?;
@@ -19,11 +24,11 @@ pub fn run() -> Result<()> {
     let runtime = env_or("KONTENA_COLIMA_RUNTIME", "docker");
     let rosetta: bool = env_parse("KONTENA_COLIMA_ROSETTA", true)?;
 
-    validate_range("cpus", cpus, 1, 256)?;
-    validate_range("memory", memory, 1, 256)?;
-    validate_range("disk", disk, 5, 2048)?;
-    validate_enum("vm_type", &vm_type, &["vz", "qemu"])?;
-    validate_enum("runtime", &runtime, &["docker", "containerd"])?;
+    validate::range("cpus", cpus, 1, 256)?;
+    validate::range("memory", memory, 1, 256)?;
+    validate::range("disk", disk, 5, 2048)?;
+    validate::one_of("vm_type", &vm_type, &["vz", "qemu"])?;
+    validate::one_of("runtime", &runtime, &["docker", "containerd"])?;
 
     info!(
         cpus, memory, disk,
@@ -54,96 +59,61 @@ pub fn run() -> Result<()> {
         args.push("--vz-rosetta");
     }
 
-    // exec replaces this process -- colima runs in foreground.
     run_exec(&bin, &args)
-}
-
-fn validate_range(name: &str, value: u32, min: u32, max: u32) -> Result<()> {
-    if value < min || value > max {
-        anyhow::bail!("{name}={value} is out of range [{min}, {max}]");
-    }
-    Ok(())
-}
-
-fn validate_enum(name: &str, value: &str, allowed: &[&str]) -> Result<()> {
-    if !allowed.contains(&value) {
-        anyhow::bail!(
-            "{name}={value:?} is not one of [{}]",
-            allowed
-                .iter()
-                .map(|s| format!("{s:?}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::util::validate;
 
     #[test]
-    fn validate_range_accepts_minimum_boundary() {
-        assert!(validate_range("cpus", 1, 1, 256).is_ok());
+    fn colima_default_cpus_within_range() {
+        assert!(validate::range("cpus", 4_u32, 1, 256).is_ok());
     }
 
     #[test]
-    fn validate_range_accepts_maximum_boundary() {
-        assert!(validate_range("cpus", 256, 1, 256).is_ok());
+    fn colima_default_memory_within_range() {
+        assert!(validate::range("memory", 8_u32, 1, 256).is_ok());
     }
 
     #[test]
-    fn validate_range_accepts_mid_value() {
-        assert!(validate_range("memory", 8, 1, 256).is_ok());
+    fn colima_default_disk_within_range() {
+        assert!(validate::range("disk", 60_u32, 5, 2048).is_ok());
     }
 
     #[test]
-    fn validate_range_rejects_below_minimum() {
-        let err = validate_range("cpus", 0, 1, 256).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("cpus=0"), "error should identify field and value: {msg}");
-        assert!(msg.contains("out of range"), "{msg}");
+    fn colima_cpus_below_minimum() {
+        let err = validate::range("cpus", 0_u32, 1, 256).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("cpus"), "{msg}");
+        assert!(msg.contains('0'), "{msg}");
     }
 
     #[test]
-    fn validate_range_rejects_above_maximum() {
-        let err = validate_range("disk", 2049, 5, 2048).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("disk=2049"), "{msg}");
+    fn colima_disk_above_maximum() {
+        let err = validate::range("disk", 2049_u32, 5, 2048).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("disk"), "{msg}");
     }
 
     #[test]
-    fn validate_enum_accepts_valid_value() {
-        assert!(validate_enum("vm_type", "vz", &["vz", "qemu"]).is_ok());
-        assert!(validate_enum("vm_type", "qemu", &["vz", "qemu"]).is_ok());
+    fn colima_valid_vm_types() {
+        assert!(validate::one_of("vm_type", "vz", &["vz", "qemu"]).is_ok());
+        assert!(validate::one_of("vm_type", "qemu", &["vz", "qemu"]).is_ok());
     }
 
     #[test]
-    fn validate_enum_rejects_invalid_value() {
-        let err = validate_enum("runtime", "podman", &["docker", "containerd"]).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("podman"), "error should mention the invalid value: {msg}");
-        assert!(msg.contains("docker"), "error should list allowed values: {msg}");
+    fn colima_invalid_runtime() {
+        let err = validate::one_of("runtime", "podman", &["docker", "containerd"]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("podman"), "{msg}");
+        assert!(msg.contains("docker"), "{msg}");
     }
 
     #[test]
-    fn validate_enum_rejects_empty_string() {
-        let err = validate_enum("vm_type", "", &["vz", "qemu"]).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("not one of"), "{msg}");
-    }
-
-    #[test]
-    fn validate_enum_case_sensitive() {
-        let err = validate_enum("vm_type", "VZ", &["vz", "qemu"]).unwrap_err();
-        let msg = format!("{err}");
+    fn colima_vm_type_case_sensitive() {
+        let err = validate::one_of("vm_type", "VZ", &["vz", "qemu"]).unwrap_err();
+        let msg = err.to_string();
         assert!(msg.contains("VZ"), "{msg}");
-    }
-
-    #[test]
-    fn validate_enum_single_allowed_value() {
-        assert!(validate_enum("x", "only", &["only"]).is_ok());
-        assert!(validate_enum("x", "other", &["only"]).is_err());
     }
 }

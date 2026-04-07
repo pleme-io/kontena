@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
 use tracing::{info, warn};
 
+use crate::error::Error;
 use crate::util::process::{run_check, run_output};
+use crate::util::validate;
 use crate::util::{env_bool, env_or, env_parse};
 
 /// Idempotent podman machine initialisation.
@@ -9,7 +10,12 @@ use crate::util::{env_bool, env_or, env_parse};
 /// Checks whether the named machine already exists and, if not, creates it with
 /// the configured CPU/memory/disk parameters.  Intended to run as a
 /// `nix-darwin` activation script replacement.
-pub fn run() -> Result<()> {
+///
+/// # Errors
+///
+/// Returns an error if configuration is invalid, subprocess execution fails,
+/// or machine init fails and the machine still does not exist.
+pub fn run() -> Result<(), Error> {
     let bin = env_or("KONTENA_PODMAN_BIN", "podman");
     let cpus: u32 = env_parse("KONTENA_PODMAN_CPUS", 4)?;
     let memory: u32 = env_parse("KONTENA_PODMAN_MEMORY", 4096)?;
@@ -17,9 +23,9 @@ pub fn run() -> Result<()> {
     let machine = env_or("KONTENA_MACHINE_NAME", "podman-machine-default");
     let rootful = env_bool("KONTENA_PODMAN_ROOTFUL", false);
 
-    validate_range("cpus", cpus, 1, 256)?;
-    validate_range("memory", memory, 512, 131_072)?;
-    validate_range("disk", disk, 10, 2048)?;
+    validate::range("cpus", cpus, 1, 256)?;
+    validate::range("memory", memory, 512, 131_072)?;
+    validate::range("disk", disk, 10, 2048)?;
 
     if machine_exists(&bin, &machine)? {
         info!(%machine, "machine already exists, skipping init");
@@ -56,63 +62,54 @@ pub fn run() -> Result<()> {
             // Podman sometimes races with itself — if the machine appeared
             // between our check and the init call, treat it as success.
             if machine_exists(&bin, &machine)? {
-                warn!(%machine, "init returned error but machine exists (race): {e:#}");
+                warn!(%machine, "init returned error but machine exists (race): {e}");
                 Ok(())
             } else {
-                Err(e).context("podman machine init failed")
+                Err(Error::MachineInit {
+                    reason: e.to_string(),
+                })
             }
         }
     }
 }
 
 /// Check whether a named podman machine exists by inspecting it.
-fn machine_exists(bin: &str, machine: &str) -> Result<bool> {
+fn machine_exists(bin: &str, machine: &str) -> Result<bool, Error> {
     run_check(bin, &["machine", "inspect", machine])
-}
-
-fn validate_range(name: &str, value: u32, min: u32, max: u32) -> Result<()> {
-    if value < min || value > max {
-        anyhow::bail!("{name}={value} is out of range [{min}, {max}]");
-    }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::util::validate;
 
     #[test]
-    fn validate_range_accepts_boundaries() {
-        assert!(validate_range("cpus", 1, 1, 256).is_ok());
-        assert!(validate_range("cpus", 256, 1, 256).is_ok());
+    fn podman_default_cpus_within_range() {
+        assert!(validate::range("cpus", 4_u32, 1, 256).is_ok());
     }
 
     #[test]
-    fn validate_range_accepts_podman_defaults() {
-        assert!(validate_range("cpus", 4, 1, 256).is_ok());
-        assert!(validate_range("memory", 4096, 512, 131_072).is_ok());
-        assert!(validate_range("disk", 60, 10, 2048).is_ok());
+    fn podman_default_memory_within_range() {
+        assert!(validate::range("memory", 4096_u32, 512, 131_072).is_ok());
     }
 
     #[test]
-    fn validate_range_rejects_memory_below_minimum() {
-        let err = validate_range("memory", 256, 512, 131_072).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("memory=256"), "{msg}");
-        assert!(msg.contains("[512, 131072]"), "{msg}");
+    fn podman_default_disk_within_range() {
+        assert!(validate::range("disk", 60_u32, 10, 2048).is_ok());
     }
 
     #[test]
-    fn validate_range_rejects_disk_above_maximum() {
-        let err = validate_range("disk", 3000, 10, 2048).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("disk=3000"), "{msg}");
+    fn podman_memory_below_minimum() {
+        let err = validate::range("memory", 256_u32, 512, 131_072).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("memory"), "{msg}");
+        assert!(msg.contains("256"), "{msg}");
     }
 
     #[test]
-    fn validate_range_min_equals_max() {
-        assert!(validate_range("x", 5, 5, 5).is_ok());
-        assert!(validate_range("x", 4, 5, 5).is_err());
-        assert!(validate_range("x", 6, 5, 5).is_err());
+    fn podman_disk_above_maximum() {
+        let err = validate::range("disk", 3000_u32, 10, 2048).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("disk"), "{msg}");
+        assert!(msg.contains("3000"), "{msg}");
     }
 }

@@ -1,7 +1,10 @@
 pub mod backoff;
 pub mod process;
+pub mod validate;
 
 use std::env;
+
+use crate::error::Error;
 
 /// Read an environment variable or return a default value.
 pub fn env_or(key: &str, default: &str) -> String {
@@ -20,18 +23,24 @@ pub fn env_bool(key: &str, default: bool) -> bool {
 ///
 /// # Errors
 ///
-/// Returns an error if the variable is set but cannot be parsed.
-pub fn env_parse<T>(key: &str, default: T) -> anyhow::Result<T>
+/// Returns [`Error::EnvParse`] if the variable is set but cannot be parsed.
+/// Returns [`Error::EnvRead`] if the variable cannot be read (e.g. invalid UTF-8).
+pub fn env_parse<T>(key: &str, default: T) -> Result<T, Error>
 where
     T: std::str::FromStr,
     T::Err: std::fmt::Display,
 {
     match env::var(key) {
-        Ok(val) => val
-            .parse::<T>()
-            .map_err(|e| anyhow::anyhow!("{key}={val:?} is not valid: {e}")),
+        Ok(val) => val.parse::<T>().map_err(|e| Error::EnvParse {
+            key: key.to_owned(),
+            value: val,
+            reason: e.to_string(),
+        }),
         Err(env::VarError::NotPresent) => Ok(default),
-        Err(e) => Err(anyhow::anyhow!("cannot read {key}: {e}")),
+        Err(e) => Err(Error::EnvRead {
+            key: key.to_owned(),
+            reason: e.to_string(),
+        }),
     }
 }
 
@@ -113,7 +122,7 @@ mod tests {
     #[test]
     fn env_parse_errors_on_invalid_value() {
         unsafe { set("TEST_ENV_PARSE_BAD", "not_a_number") };
-        let result: anyhow::Result<u32> = env_parse("TEST_ENV_PARSE_BAD", 0);
+        let result: Result<u32, _> = env_parse("TEST_ENV_PARSE_BAD", 0);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("not_a_number"), "error should mention the bad value: {msg}");
@@ -123,7 +132,7 @@ mod tests {
     #[test]
     fn env_parse_handles_negative_for_unsigned() {
         unsafe { set("TEST_ENV_PARSE_NEG", "-1") };
-        let result: anyhow::Result<u32> = env_parse("TEST_ENV_PARSE_NEG", 0);
+        let result: Result<u32, _> = env_parse("TEST_ENV_PARSE_NEG", 0);
         assert!(result.is_err());
         unsafe { unset("TEST_ENV_PARSE_NEG") };
     }
@@ -131,7 +140,7 @@ mod tests {
     #[test]
     fn env_parse_handles_overflow() {
         unsafe { set("TEST_ENV_PARSE_OVER", "999999999999999") };
-        let result: anyhow::Result<u32> = env_parse("TEST_ENV_PARSE_OVER", 0);
+        let result: Result<u32, _> = env_parse("TEST_ENV_PARSE_OVER", 0);
         assert!(result.is_err());
         unsafe { unset("TEST_ENV_PARSE_OVER") };
     }

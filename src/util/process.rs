@@ -1,35 +1,49 @@
 use std::process::Command;
 
-use anyhow::{Context, Result};
 use tracing::debug;
+
+use crate::error::Error;
 
 /// Run a command and return whether it exited successfully (code 0).
 ///
-/// Stdout and stderr are inherited so the caller sees output in logs.
-pub fn run_check(bin: &str, args: &[&str]) -> Result<bool> {
+/// Stdout and stderr are suppressed so the caller only gets the exit status.
+pub fn run_check(bin: &str, args: &[&str]) -> Result<bool, Error> {
     debug!(bin, ?args, "run_check");
     let status = Command::new(bin)
         .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .with_context(|| format!("failed to execute {bin}"))?;
+        .map_err(|e| Error::Spawn {
+            bin: bin.to_owned(),
+            reason: e.to_string(),
+        })?;
     debug!(bin, code = status.code(), "run_check finished");
     Ok(status.success())
 }
 
 /// Run a command and capture its stdout as a trimmed `String`.
 ///
-/// Returns an error if the process exits with a non-zero code.
-pub fn run_output(bin: &str, args: &[&str]) -> Result<String> {
+/// # Errors
+///
+/// Returns [`Error::Spawn`] if the process cannot be started, or
+/// [`Error::NonZeroExit`] if it exits with a non-zero status.
+pub fn run_output(bin: &str, args: &[&str]) -> Result<String, Error> {
     debug!(bin, ?args, "run_output");
     let output = Command::new(bin)
         .args(args)
         .output()
-        .with_context(|| format!("failed to execute {bin}"))?;
+        .map_err(|e| Error::Spawn {
+            bin: bin.to_owned(),
+            reason: e.to_string(),
+        })?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("{bin} exited with {}: {stderr}", output.status);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::NonZeroExit {
+            bin: bin.to_owned(),
+            status: output.status.to_string(),
+            stderr,
+        });
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     debug!(bin, %stdout, "run_output finished");
@@ -41,7 +55,7 @@ pub fn run_output(bin: &str, args: &[&str]) -> Result<String> {
 /// This function only returns on error — on success the process image is
 /// replaced entirely.
 #[cfg(unix)]
-pub fn run_exec(bin: &str, args: &[&str]) -> Result<()> {
+pub fn run_exec(bin: &str, args: &[&str]) -> Result<(), Error> {
     use std::os::unix::process::CommandExt;
 
     debug!(bin, ?args, "exec");
@@ -49,9 +63,11 @@ pub fn run_exec(bin: &str, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new(bin);
     cmd.args(args);
 
-    // exec() replaces the process image; only returns on error.
     let err = cmd.exec();
-    Err(anyhow::anyhow!("exec({bin}) failed: {err}"))
+    Err(Error::Exec {
+        bin: bin.to_owned(),
+        reason: err.to_string(),
+    })
 }
 
 #[cfg(test)]
