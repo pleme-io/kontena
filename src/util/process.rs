@@ -114,12 +114,6 @@ pub fn run_output(bin: &str, args: &[&str]) -> Result<String, Error> {
     SystemCommandRunner.run_output(bin, args)
 }
 
-/// Replace the current process with the given command (unix `exec`).
-#[cfg(unix)]
-pub fn run_exec(bin: &str, args: &[&str]) -> Result<(), Error> {
-    SystemCommandRunner.run_exec(bin, args)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
