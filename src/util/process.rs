@@ -167,4 +167,16 @@ mod tests {
         assert!(out.contains("line1"), "{out}");
         assert!(out.contains("line3"), "{out}");
     }
+
+    #[test]
+    fn run_check_spawn_error_is_typed() {
+        let err = runner().run_check("__no_such_binary_kontena_test__", &[]).unwrap_err();
+        assert!(matches!(err, Error::Spawn { .. }));
+    }
+
+    #[test]
+    fn run_output_nonzero_exit_is_typed() {
+        let err = runner().run_output("false", &[]).unwrap_err();
+        assert!(matches!(err, Error::NonZeroExit { .. }));
+    }
 }
