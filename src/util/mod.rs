@@ -155,4 +155,18 @@ mod tests {
         assert!(v);
         unsafe { unset("TEST_ENV_PARSE_BOOL") };
     }
+
+    #[test]
+    fn env_parse_error_is_env_parse_variant() {
+        unsafe { set("TEST_ENV_PARSE_TYPED", "abc") };
+        let err = env_parse::<u32>("TEST_ENV_PARSE_TYPED", 0).unwrap_err();
+        assert!(matches!(err, Error::EnvParse { .. }));
+        unsafe { unset("TEST_ENV_PARSE_TYPED") };
+    }
+
+    #[test]
+    fn env_error_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Error>();
+    }
 }
