@@ -35,9 +35,9 @@ impl InitConfig {
 
     /// Validate all config values against their allowed ranges.
     fn validate(&self) -> Result<(), Error> {
-        validate::range("cpus", self.cpus, 1, 256)?;
-        validate::range("memory", self.memory, 512, 131_072)?;
-        validate::range("disk", self.disk, 10, 2048)?;
+        validate::range("cpus", &self.cpus, &1, &256)?;
+        validate::range("memory", &self.memory, &512, &131_072)?;
+        validate::range("disk", &self.disk, &10, &2048)?;
         Ok(())
     }
 }
@@ -133,22 +133,22 @@ mod tests {
 
     #[test]
     fn podman_default_cpus_within_range() {
-        assert!(validate::range("cpus", 4_u32, 1, 256).is_ok());
+        assert!(validate::range("cpus", &4_u32, &1, &256).is_ok());
     }
 
     #[test]
     fn podman_default_memory_within_range() {
-        assert!(validate::range("memory", 4096_u32, 512, 131_072).is_ok());
+        assert!(validate::range("memory", &4096_u32, &512, &131_072).is_ok());
     }
 
     #[test]
     fn podman_default_disk_within_range() {
-        assert!(validate::range("disk", 60_u32, 10, 2048).is_ok());
+        assert!(validate::range("disk", &60_u32, &10, &2048).is_ok());
     }
 
     #[test]
     fn podman_memory_below_minimum() {
-        let err = validate::range("memory", 256_u32, 512, 131_072).unwrap_err();
+        let err = validate::range("memory", &256_u32, &512, &131_072).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("memory"), "{msg}");
         assert!(msg.contains("256"), "{msg}");
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn podman_disk_above_maximum() {
-        let err = validate::range("disk", 3000_u32, 10, 2048).unwrap_err();
+        let err = validate::range("disk", &3000_u32, &10, &2048).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("disk"), "{msg}");
         assert!(msg.contains("3000"), "{msg}");

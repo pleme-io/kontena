@@ -6,7 +6,8 @@ use std::time::Duration;
 /// duration to sleep before the next attempt, multiplying the previous delay by
 /// `multiplier` and capping at `max`.  Returns `None` once `max_attempts` have
 /// been exhausted.
-pub struct ExponentialBackoff {
+pub(crate) struct ExponentialBackoff {
+    #[cfg(test)]
     initial: Duration,
     current: Duration,
     multiplier: f64,
@@ -22,8 +23,9 @@ impl ExponentialBackoff {
     /// * `multiplier`   -- factor applied after each attempt (e.g. 1.5)
     /// * `max`          -- ceiling for any single delay
     /// * `max_attempts` -- total attempts before giving up
-    pub fn new(initial: Duration, multiplier: f64, max: Duration, max_attempts: u32) -> Self {
+    pub(crate) fn new(initial: Duration, multiplier: f64, max: Duration, max_attempts: u32) -> Self {
         Self {
+            #[cfg(test)]
             initial,
             current: initial,
             multiplier,
@@ -34,14 +36,13 @@ impl ExponentialBackoff {
     }
 
     /// Returns the next delay to sleep, or `None` if `max_attempts` reached.
-    pub fn next_delay(&mut self) -> Option<Duration> {
+    pub(crate) fn next_delay(&mut self) -> Option<Duration> {
         if self.attempts >= self.max_attempts {
             return None;
         }
         let delay = self.current;
         self.attempts += 1;
 
-        // Advance for next call.
         let next_secs = self.current.as_secs_f64() * self.multiplier;
         self.current = Duration::from_secs_f64(next_secs.min(self.max.as_secs_f64()));
 
@@ -49,13 +50,15 @@ impl ExponentialBackoff {
     }
 
     /// Reset the backoff to its initial state.
-    pub fn reset(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn reset(&mut self) {
         self.current = self.initial;
         self.attempts = 0;
     }
 
     /// Number of attempts consumed so far.
-    pub fn attempts(&self) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn attempts(&self) -> u32 {
         self.attempts
     }
 }
@@ -73,16 +76,13 @@ mod tests {
             5,
         );
 
-        // 100, 200, 400, 500 (capped), 500 (capped)
         assert_eq!(b.next_delay(), Some(Duration::from_millis(100)));
         assert_eq!(b.next_delay(), Some(Duration::from_millis(200)));
         assert_eq!(b.next_delay(), Some(Duration::from_millis(400)));
-        // Next would be 800 but capped at 500
         let d = b.next_delay().unwrap();
         assert!(d <= Duration::from_millis(500));
         let d = b.next_delay().unwrap();
         assert!(d <= Duration::from_millis(500));
-        // Exhausted
         assert_eq!(b.next_delay(), None);
         assert_eq!(b.attempts(), 5);
     }

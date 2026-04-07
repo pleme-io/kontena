@@ -33,9 +33,9 @@ impl ColimaConfig {
 
     /// Validate all config values against their allowed ranges / enum sets.
     fn validate(&self) -> Result<(), Error> {
-        validate::range("cpus", self.cpus, 1, 256)?;
-        validate::range("memory", self.memory, 1, 256)?;
-        validate::range("disk", self.disk, 5, 2048)?;
+        validate::range("cpus", &self.cpus, &1, &256)?;
+        validate::range("memory", &self.memory, &1, &256)?;
+        validate::range("disk", &self.disk, &5, &2048)?;
         validate::one_of("vm_type", &self.vm_type, &["vz", "qemu"])?;
         validate::one_of("runtime", &self.runtime, &["docker", "containerd"])?;
         Ok(())
@@ -119,22 +119,22 @@ mod tests {
 
     #[test]
     fn colima_default_cpus_within_range() {
-        assert!(validate::range("cpus", 4_u32, 1, 256).is_ok());
+        assert!(validate::range("cpus", &4_u32, &1, &256).is_ok());
     }
 
     #[test]
     fn colima_default_memory_within_range() {
-        assert!(validate::range("memory", 8_u32, 1, 256).is_ok());
+        assert!(validate::range("memory", &8_u32, &1, &256).is_ok());
     }
 
     #[test]
     fn colima_default_disk_within_range() {
-        assert!(validate::range("disk", 60_u32, 5, 2048).is_ok());
+        assert!(validate::range("disk", &60_u32, &5, &2048).is_ok());
     }
 
     #[test]
     fn colima_cpus_below_minimum() {
-        let err = validate::range("cpus", 0_u32, 1, 256).unwrap_err();
+        let err = validate::range("cpus", &0_u32, &1, &256).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("cpus"), "{msg}");
         assert!(msg.contains('0'), "{msg}");
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn colima_disk_above_maximum() {
-        let err = validate::range("disk", 2049_u32, 5, 2048).unwrap_err();
+        let err = validate::range("disk", &2049_u32, &5, &2048).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("disk"), "{msg}");
     }

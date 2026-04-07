@@ -101,97 +101,70 @@ impl CommandRunner for SystemCommandRunner {
     }
 }
 
-/// Free-function wrappers using the system runner for backward compatibility
-/// with code that hasn't been converted to use the trait yet.
-
-/// Run a command and return whether it exited successfully (code 0).
-pub fn run_check(bin: &str, args: &[&str]) -> Result<bool, Error> {
-    SystemCommandRunner.run_check(bin, args)
-}
-
-/// Run a command and capture its stdout as a trimmed `String`.
-pub fn run_output(bin: &str, args: &[&str]) -> Result<String, Error> {
-    SystemCommandRunner.run_output(bin, args)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn runner() -> SystemCommandRunner {
+        SystemCommandRunner
+    }
+
     #[test]
     fn run_check_returns_true_for_success() {
-        let ok = run_check("true", &[]).unwrap();
-        assert!(ok);
+        assert!(runner().run_check("true", &[]).unwrap());
     }
 
     #[test]
     fn run_check_returns_false_for_failure() {
-        let ok = run_check("false", &[]).unwrap();
-        assert!(!ok);
+        assert!(!runner().run_check("false", &[]).unwrap());
     }
 
     #[test]
     fn run_check_errors_on_nonexistent_binary() {
-        let result = run_check("__no_such_binary_kontena_test__", &[]);
+        let result = runner().run_check("__no_such_binary_kontena_test__", &[]);
         assert!(result.is_err());
-        let msg = format!("{}", result.unwrap_err());
+        let msg = result.unwrap_err().to_string();
         assert!(msg.contains("failed to execute"), "{msg}");
     }
 
     #[test]
     fn run_output_captures_stdout() {
-        let out = run_output("echo", &["hello world"]).unwrap();
+        let out = runner().run_output("echo", &["hello world"]).unwrap();
         assert_eq!(out, "hello world");
     }
 
     #[test]
     fn run_output_trims_whitespace() {
-        let out = run_output("echo", &[""]).unwrap();
+        let out = runner().run_output("echo", &[""]).unwrap();
         assert_eq!(out, "");
     }
 
     #[test]
     fn run_output_errors_on_nonzero_exit() {
-        let result = run_output("false", &[]);
+        let result = runner().run_output("false", &[]);
         assert!(result.is_err());
-        let msg = format!("{}", result.unwrap_err());
+        let msg = result.unwrap_err().to_string();
         assert!(msg.contains("exited with"), "{msg}");
     }
 
     #[test]
     fn run_output_errors_on_nonexistent_binary() {
-        let result = run_output("__no_such_binary_kontena_test__", &[]);
+        let result = runner().run_output("__no_such_binary_kontena_test__", &[]);
         assert!(result.is_err());
-        let msg = format!("{}", result.unwrap_err());
+        let msg = result.unwrap_err().to_string();
         assert!(msg.contains("failed to execute"), "{msg}");
     }
 
     #[test]
     fn run_check_with_arguments() {
-        let ok = run_check("test", &["1", "-eq", "1"]).unwrap();
-        assert!(ok);
-        let ok = run_check("test", &["1", "-eq", "2"]).unwrap();
-        assert!(!ok);
+        assert!(runner().run_check("test", &["1", "-eq", "1"]).unwrap());
+        assert!(!runner().run_check("test", &["1", "-eq", "2"]).unwrap());
     }
 
     #[test]
     fn run_output_multiline_captures_full_output() {
-        let out = run_output("printf", &["line1\nline2\nline3"]).unwrap();
+        let out = runner().run_output("printf", &["line1\nline2\nline3"]).unwrap();
         assert!(out.contains("line1"), "{out}");
         assert!(out.contains("line3"), "{out}");
-    }
-
-    #[test]
-    fn system_runner_check_delegates_correctly() {
-        let runner = SystemCommandRunner;
-        assert!(runner.run_check("true", &[]).unwrap());
-        assert!(!runner.run_check("false", &[]).unwrap());
-    }
-
-    #[test]
-    fn system_runner_output_delegates_correctly() {
-        let runner = SystemCommandRunner;
-        let out = runner.run_output("echo", &["test"]).unwrap();
-        assert_eq!(out, "test");
     }
 }

@@ -1,8 +1,7 @@
-use std::time::Duration;
-
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
+use crate::util::backoff::ExponentialBackoff;
 use crate::util::process::{CommandRunner, SystemCommandRunner};
 use crate::util::{env_bool, env_or, env_parse};
 
@@ -130,16 +129,26 @@ pub(crate) fn start_machine(runner: &dyn CommandRunner, bin: &str, machine: &str
 
 /// Poll the machine state with adaptive intervals.
 ///
-/// Starts at 1 s and increases by 10 % each check up to 30 s.  Returns when
+/// Uses [`ExponentialBackoff`] starting at 1 s with 1.1× growth, capped at
+/// 30 s. The loop runs indefinitely (max attempts set high) — it returns when
 /// the machine is no longer in the "running" state so that launchd can restart
 /// the agent.
 fn monitor_machine(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Result<(), Error> {
-    let mut interval = Duration::from_secs(1);
-    let max_interval = Duration::from_secs(30);
+    use std::time::Duration;
+
+    let mut backoff = ExponentialBackoff::new(
+        Duration::from_secs(1),
+        1.1,
+        Duration::from_secs(30),
+        u32::MAX,
+    );
 
     info!(%machine, "monitoring machine state");
 
     loop {
+        let Some(interval) = backoff.next_delay() else {
+            return Ok(());
+        };
         std::thread::sleep(interval);
 
         let state = get_machine_state(runner, bin, machine)?;
@@ -150,9 +159,6 @@ fn monitor_machine(runner: &dyn CommandRunner, bin: &str, machine: &str) -> Resu
         }
 
         debug!(%machine, ?interval, "machine is running");
-
-        let next_secs = (interval.as_secs_f64() * 1.1).min(max_interval.as_secs_f64());
-        interval = Duration::from_secs_f64(next_secs);
     }
 }
 

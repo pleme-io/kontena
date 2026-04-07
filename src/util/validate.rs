@@ -7,7 +7,7 @@ use crate::error::Error;
 /// # Errors
 ///
 /// Returns [`Error::OutOfRange`] when the value is outside the bounds.
-pub fn range<T: PartialOrd + fmt::Display>(name: &str, value: T, min: T, max: T) -> Result<(), Error> {
+pub fn range<T: PartialOrd + fmt::Display>(name: &str, value: &T, min: &T, max: &T) -> Result<(), Error> {
     if value < min || value > max {
         return Err(Error::OutOfRange {
             name: name.to_owned(),
@@ -46,18 +46,18 @@ mod tests {
 
     #[test]
     fn range_accepts_boundaries() {
-        assert!(range("cpus", 1_u32, 1, 256).is_ok());
-        assert!(range("cpus", 256_u32, 1, 256).is_ok());
+        assert!(range("cpus", &1_u32, &1, &256).is_ok());
+        assert!(range("cpus", &256_u32, &1, &256).is_ok());
     }
 
     #[test]
     fn range_accepts_mid_value() {
-        assert!(range("memory", 8_u32, 1, 256).is_ok());
+        assert!(range("memory", &8_u32, &1, &256).is_ok());
     }
 
     #[test]
     fn range_rejects_below_minimum() {
-        let err = range("cpus", 0_u32, 1, 256).unwrap_err();
+        let err = range("cpus", &0_u32, &1, &256).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("cpus"), "{msg}");
         assert!(msg.contains('0'), "{msg}");
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn range_rejects_above_maximum() {
-        let err = range("disk", 3000_u32, 10, 2048).unwrap_err();
+        let err = range("disk", &3000_u32, &10, &2048).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("disk"), "{msg}");
         assert!(msg.contains("3000"), "{msg}");
@@ -73,15 +73,15 @@ mod tests {
 
     #[test]
     fn range_min_equals_max() {
-        assert!(range("x", 5_u32, 5, 5).is_ok());
-        assert!(range("x", 4_u32, 5, 5).is_err());
-        assert!(range("x", 6_u32, 5, 5).is_err());
+        assert!(range("x", &5_u32, &5, &5).is_ok());
+        assert!(range("x", &4_u32, &5, &5).is_err());
+        assert!(range("x", &6_u32, &5, &5).is_err());
     }
 
     #[test]
     fn range_works_with_f64() {
-        assert!(range("ratio", 0.5_f64, 0.0, 1.0).is_ok());
-        assert!(range("ratio", 1.5_f64, 0.0, 1.0).is_err());
+        assert!(range("ratio", &0.5_f64, &0.0, &1.0).is_ok());
+        assert!(range("ratio", &1.5_f64, &0.0, &1.0).is_err());
     }
 
     #[test]
