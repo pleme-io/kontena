@@ -42,6 +42,7 @@ impl ColimaConfig {
     }
 
     /// Build the argument list for the colima start command.
+    #[must_use]
     pub(crate) fn build_args(&self) -> Vec<String> {
         let mut args = vec![
             "start".to_owned(),

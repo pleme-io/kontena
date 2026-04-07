@@ -7,6 +7,7 @@ use crate::error::Error;
 /// # Errors
 ///
 /// Returns [`Error::OutOfRange`] when the value is outside the bounds.
+#[must_use = "validation result must be checked"]
 pub fn range<T: PartialOrd + fmt::Display>(name: &str, value: &T, min: &T, max: &T) -> Result<(), Error> {
     if value < min || value > max {
         return Err(Error::OutOfRange {
@@ -24,6 +25,7 @@ pub fn range<T: PartialOrd + fmt::Display>(name: &str, value: &T, min: &T, max: 
 /// # Errors
 ///
 /// Returns [`Error::InvalidEnum`] when the value is not found in the list.
+#[must_use = "validation result must be checked"]
 pub fn one_of(name: &str, value: &str, allowed: &[&str]) -> Result<(), Error> {
     if !allowed.contains(&value) {
         let allowed_display = allowed

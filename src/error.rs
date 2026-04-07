@@ -176,4 +176,27 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Error>();
     }
+
+    #[test]
+    fn error_clone_preserves_variant() {
+        let err = Error::OutOfRange {
+            name: "cpus".into(),
+            value: "0".into(),
+            min: "1".into(),
+            max: "256".into(),
+        };
+        let cloned = err.clone();
+        assert_eq!(err.to_string(), cloned.to_string());
+    }
+
+    #[test]
+    fn error_debug_is_not_empty() {
+        let err = Error::Spawn {
+            bin: "podman".into(),
+            reason: "not found".into(),
+        };
+        let debug = format!("{err:?}");
+        assert!(!debug.is_empty());
+        assert!(debug.contains("Spawn"));
+    }
 }
