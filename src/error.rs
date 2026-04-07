@@ -58,3 +58,121 @@ pub enum Error {
     #[error("failed to inspect machine {machine}: {reason}")]
     MachineInspect { machine: String, reason: String },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn out_of_range_display() {
+        let err = Error::OutOfRange {
+            name: "cpus".into(),
+            value: "0".into(),
+            min: "1".into(),
+            max: "256".into(),
+        };
+        let msg = err.to_string();
+        assert_eq!(msg, "cpus=0 is out of range [1, 256]");
+    }
+
+    #[test]
+    fn invalid_enum_display() {
+        let err = Error::InvalidEnum {
+            name: "vm_type".into(),
+            value: "hyperv".into(),
+            allowed: "\"vz\", \"qemu\"".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("hyperv"), "{msg}");
+        assert!(msg.contains("not one of"), "{msg}");
+    }
+
+    #[test]
+    fn env_parse_display() {
+        let err = Error::EnvParse {
+            key: "MY_VAR".into(),
+            value: "abc".into(),
+            reason: "invalid digit".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("MY_VAR"), "{msg}");
+        assert!(msg.contains("abc"), "{msg}");
+        assert!(msg.contains("invalid digit"), "{msg}");
+    }
+
+    #[test]
+    fn spawn_display() {
+        let err = Error::Spawn {
+            bin: "podman".into(),
+            reason: "No such file".into(),
+        };
+        let msg = err.to_string();
+        assert_eq!(msg, "failed to execute podman: No such file");
+    }
+
+    #[test]
+    fn non_zero_exit_display() {
+        let err = Error::NonZeroExit {
+            bin: "podman".into(),
+            status: "exit status: 1".into(),
+            stderr: "error msg".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("podman"), "{msg}");
+        assert!(msg.contains("exit status: 1"), "{msg}");
+        assert!(msg.contains("error msg"), "{msg}");
+    }
+
+    #[test]
+    fn exec_display() {
+        let err = Error::Exec {
+            bin: "colima".into(),
+            reason: "not found".into(),
+        };
+        assert_eq!(err.to_string(), "exec(colima) failed: not found");
+    }
+
+    #[test]
+    fn machine_init_display() {
+        let err = Error::MachineInit {
+            reason: "disk full".into(),
+        };
+        assert_eq!(err.to_string(), "podman machine init failed: disk full");
+    }
+
+    #[test]
+    fn machine_start_display() {
+        let err = Error::MachineStart {
+            reason: "timeout".into(),
+        };
+        assert_eq!(err.to_string(), "podman machine start failed: timeout");
+    }
+
+    #[test]
+    fn machine_inspect_display() {
+        let err = Error::MachineInspect {
+            machine: "my-machine".into(),
+            reason: "not found".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("my-machine"), "{msg}");
+        assert!(msg.contains("not found"), "{msg}");
+    }
+
+    #[test]
+    fn env_read_display() {
+        let err = Error::EnvRead {
+            key: "BAD_KEY".into(),
+            reason: "invalid utf-8".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("BAD_KEY"), "{msg}");
+        assert!(msg.contains("invalid utf-8"), "{msg}");
+    }
+
+    #[test]
+    fn error_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Error>();
+    }
+}
