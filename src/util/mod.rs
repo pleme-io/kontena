@@ -8,11 +8,13 @@ use std::env;
 use crate::error::Error;
 
 /// Read an environment variable or return a default value.
+#[must_use]
 pub fn env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_owned())
 }
 
 /// Read a boolean environment variable (true/false/1/0), or return a default.
+#[must_use]
 pub fn env_bool(key: &str, default: bool) -> bool {
     match env::var(key) {
         Ok(val) => matches!(val.as_str(), "true" | "1" | "yes"),
