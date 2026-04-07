@@ -53,3 +53,71 @@ pub fn run_exec(bin: &str, args: &[&str]) -> Result<()> {
     let err = cmd.exec();
     Err(anyhow::anyhow!("exec({bin}) failed: {err}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_check_returns_true_for_success() {
+        let ok = run_check("true", &[]).unwrap();
+        assert!(ok);
+    }
+
+    #[test]
+    fn run_check_returns_false_for_failure() {
+        let ok = run_check("false", &[]).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn run_check_errors_on_nonexistent_binary() {
+        let result = run_check("__no_such_binary_kontena_test__", &[]);
+        assert!(result.is_err());
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(msg.contains("failed to execute"), "{msg}");
+    }
+
+    #[test]
+    fn run_output_captures_stdout() {
+        let out = run_output("echo", &["hello world"]).unwrap();
+        assert_eq!(out, "hello world");
+    }
+
+    #[test]
+    fn run_output_trims_whitespace() {
+        let out = run_output("echo", &[""]).unwrap();
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn run_output_errors_on_nonzero_exit() {
+        let result = run_output("false", &[]);
+        assert!(result.is_err());
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(msg.contains("exited with"), "{msg}");
+    }
+
+    #[test]
+    fn run_output_errors_on_nonexistent_binary() {
+        let result = run_output("__no_such_binary_kontena_test__", &[]);
+        assert!(result.is_err());
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(msg.contains("failed to execute"), "{msg}");
+    }
+
+    #[test]
+    fn run_check_with_arguments() {
+        let ok = run_check("test", &["1", "-eq", "1"]).unwrap();
+        assert!(ok);
+        let ok = run_check("test", &["1", "-eq", "2"]).unwrap();
+        assert!(!ok);
+    }
+
+    #[test]
+    fn run_output_multiline_captures_full_output() {
+        let out = run_output("printf", &["line1\nline2\nline3"]).unwrap();
+        assert!(out.contains("line1"), "{out}");
+        assert!(out.contains("line3"), "{out}");
+    }
+}

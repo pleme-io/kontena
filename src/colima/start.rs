@@ -78,3 +78,72 @@ fn validate_enum(name: &str, value: &str, allowed: &[&str]) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_range_accepts_minimum_boundary() {
+        assert!(validate_range("cpus", 1, 1, 256).is_ok());
+    }
+
+    #[test]
+    fn validate_range_accepts_maximum_boundary() {
+        assert!(validate_range("cpus", 256, 1, 256).is_ok());
+    }
+
+    #[test]
+    fn validate_range_accepts_mid_value() {
+        assert!(validate_range("memory", 8, 1, 256).is_ok());
+    }
+
+    #[test]
+    fn validate_range_rejects_below_minimum() {
+        let err = validate_range("cpus", 0, 1, 256).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("cpus=0"), "error should identify field and value: {msg}");
+        assert!(msg.contains("out of range"), "{msg}");
+    }
+
+    #[test]
+    fn validate_range_rejects_above_maximum() {
+        let err = validate_range("disk", 2049, 5, 2048).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("disk=2049"), "{msg}");
+    }
+
+    #[test]
+    fn validate_enum_accepts_valid_value() {
+        assert!(validate_enum("vm_type", "vz", &["vz", "qemu"]).is_ok());
+        assert!(validate_enum("vm_type", "qemu", &["vz", "qemu"]).is_ok());
+    }
+
+    #[test]
+    fn validate_enum_rejects_invalid_value() {
+        let err = validate_enum("runtime", "podman", &["docker", "containerd"]).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("podman"), "error should mention the invalid value: {msg}");
+        assert!(msg.contains("docker"), "error should list allowed values: {msg}");
+    }
+
+    #[test]
+    fn validate_enum_rejects_empty_string() {
+        let err = validate_enum("vm_type", "", &["vz", "qemu"]).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not one of"), "{msg}");
+    }
+
+    #[test]
+    fn validate_enum_case_sensitive() {
+        let err = validate_enum("vm_type", "VZ", &["vz", "qemu"]).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("VZ"), "{msg}");
+    }
+
+    #[test]
+    fn validate_enum_single_allowed_value() {
+        assert!(validate_enum("x", "only", &["only"]).is_ok());
+        assert!(validate_enum("x", "other", &["only"]).is_err());
+    }
+}

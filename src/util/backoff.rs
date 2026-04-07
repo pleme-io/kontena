@@ -106,4 +106,92 @@ mod tests {
         assert_eq!(b.attempts(), 0);
         assert_eq!(b.next_delay(), Some(Duration::from_millis(10)));
     }
+
+    #[test]
+    fn zero_max_attempts_returns_none_immediately() {
+        let mut b = ExponentialBackoff::new(
+            Duration::from_millis(100),
+            2.0,
+            Duration::from_secs(10),
+            0,
+        );
+        assert_eq!(b.next_delay(), None);
+        assert_eq!(b.attempts(), 0);
+    }
+
+    #[test]
+    fn single_attempt() {
+        let mut b = ExponentialBackoff::new(
+            Duration::from_millis(50),
+            2.0,
+            Duration::from_secs(10),
+            1,
+        );
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(50)));
+        assert_eq!(b.next_delay(), None);
+        assert_eq!(b.attempts(), 1);
+    }
+
+    #[test]
+    fn multiplier_one_stays_constant() {
+        let mut b = ExponentialBackoff::new(
+            Duration::from_millis(200),
+            1.0,
+            Duration::from_secs(10),
+            3,
+        );
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(200)));
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(200)));
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(200)));
+        assert_eq!(b.next_delay(), None);
+    }
+
+    #[test]
+    fn initial_exceeds_max_caps_immediately() {
+        let mut b = ExponentialBackoff::new(
+            Duration::from_secs(60),
+            2.0,
+            Duration::from_secs(10),
+            3,
+        );
+        let first = b.next_delay().unwrap();
+        assert_eq!(first, Duration::from_secs(60));
+        let second = b.next_delay().unwrap();
+        assert!(
+            second <= Duration::from_secs(10),
+            "after first delay the cap should apply: got {second:?}"
+        );
+    }
+
+    #[test]
+    fn reset_after_partial_use() {
+        let mut b = ExponentialBackoff::new(
+            Duration::from_millis(10),
+            2.0,
+            Duration::from_secs(1),
+            5,
+        );
+        assert!(b.next_delay().is_some());
+        assert!(b.next_delay().is_some());
+        assert_eq!(b.attempts(), 2);
+
+        b.reset();
+        assert_eq!(b.attempts(), 0);
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(10)));
+        assert_eq!(b.attempts(), 1);
+    }
+
+    #[test]
+    fn fractional_multiplier() {
+        let mut b = ExponentialBackoff::new(
+            Duration::from_millis(1000),
+            1.5,
+            Duration::from_secs(10),
+            3,
+        );
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(1000)));
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(1500)));
+        assert_eq!(b.next_delay(), Some(Duration::from_millis(2250)));
+        assert_eq!(b.next_delay(), None);
+    }
 }
